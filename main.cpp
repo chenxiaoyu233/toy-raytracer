@@ -11,20 +11,28 @@ struct Vec {
     
     Vec(Ftype x = 0, Ftype y = 0, Ftype z = 0);
     Ftype& operator[] (int i);
-    Ftype norm(int p = 2);
+    const Ftype operator[] (int i) const;
+    Ftype norm();
+    Ftype x();
+    Ftype y();
+    Ftype z();
 };
 typedef Vec Color;
 
 Vec::Vec(Ftype x, Ftype y, Ftype z) { w[0] = x, w[1] = y, w[2] = z; }
 Ftype& Vec::operator[] (int i) { return w[i]; }
-Ftype Vec::norm(int p) { return pow(pow(w[0], p) + pow(w[1], p) + pow(w[2], p), 1/p); }
+const Ftype Vec::operator[] (int i) const { return w[i]; }
+Ftype Vec::norm() { return sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]); }
+Ftype Vec::x() { return w[0]; }
+Ftype Vec::y() { return w[1]; }
+Ftype Vec::z() { return w[2]; }
 
-Vec operator + (Vec &a, Vec &b)  { return Vec(a[0] + b[0], a[1] + b[1], a[2] + b[2]); }
-Vec operator - (Vec &a, Vec &b)  { return Vec(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
-Vec operator * (Vec &a, Ftype b) { return Vec(a[0] * b, a[1] * b, a[2] * b); }
-Vec operator * (Ftype a, Vec &b) { return Vec(a * b[0], a * b[1], a * b[2]); }
-Vec operator / (Vec &a, Ftype b) { return Vec(a[0] / b, a[1] / b, a[2] / b); }
-Vec operator / (Ftype a, Vec &b) { return Vec(a / b[0], a / b[1], a / b[2]); }
+Vec operator + (const Vec &a, const Vec &b) { return Vec(a[0] + b[0], a[1] + b[1], a[2] + b[2]); }
+Vec operator - (const Vec &a, const Vec &b) { return Vec(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
+Vec operator * (const Vec &a, Ftype b)      { return Vec(a[0] * b, a[1] * b, a[2] * b); }
+Vec operator * (Ftype a, const Vec &b)      { return Vec(a * b[0], a * b[1], a * b[2]); }
+Vec operator / (const Vec &a, Ftype b)      { return Vec(a[0] / b, a[1] / b, a[2] / b); }
+Vec operator / (Ftype a, const Vec &b)      { return Vec(a / b[0], a / b[1], a / b[2]); }
     
 
 Ftype dot(Vec &a, Vec &b) {
@@ -35,15 +43,31 @@ Vec cross(Vec &a, Vec &b) {
                a[0] * b[2] - a[2] * b[0],
                a[0] * b[1] - a[1] * b[0]); }
 
+struct Ray { Vec o, p; };
+
+inline Ray rayFromCam(int i, int j, int r, int c) {
+    Vec o(0, 0, 0);
+    Vec p(-2 + float(j) / float(c) * 4.0 , 1 - float(i) / float(r) * 2.0  ,-1);
+    return Ray {o, p};
+}
+
+Color rayTrace(Ray ray) {
+    ray.p = ray.p / ray.p.norm();
+    Ftype t = 0.5 * (ray.p.y() + 1.0);
+    return (1.0 - t) * Color(1.0, 1.0, 1.0) + t * Color(0.5, 0.7, 1.0);
+}
+
 Color** createImg(int r, int c) {
     Color **p = new Color* [r];
     for (int i = 0; i < r; i++) p[i] = new Color[c];
     return p;
 }
+
 void deleteImg(Color **p, int r) {
     for (int i = 0; i < r; i++) delete[] p[i];
     delete[] p;
 }
+
 void toPPM(Color **img, int r, int c, string fname = "out.ppm") {
     FILE *fpt = fopen(fname.c_str(), "w");
     fprintf(fpt, "P3\n");
@@ -65,15 +89,14 @@ void toPPM(Color **img, int r, int c, string fname = "out.ppm") {
 
 int main() {
     int c = 200, r = 100;
-    Color **a = createImg(r, c);
+    Color **img = createImg(r, c);
     for (int i = 0; i < r; i++)
         for (int j = 0; j < c; j++) {
-            a[i][j][0] = 255.99 * float(i) / float(r);
-            a[i][j][1] = 255.99 * float(j) / float(c);
-            a[i][j][2] = 255.99 * 0.2;
+            img[i][j] = rayTrace(rayFromCam(i, j, r, c));
+            img[i][j] = img[i][j] * 255.99;
         }
-    toPPM(a, r, c);
-    deleteImg(a, r);
+    toPPM(img, r, c);
+    deleteImg(img, r);
     return 0;
 }
 
