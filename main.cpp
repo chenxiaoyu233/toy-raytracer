@@ -56,7 +56,7 @@ struct Camera {
         z = (from - at) / (from - at).norm();
         x = cross(up, z), x /= x.norm();
         y = cross(z, x), y /= y.norm();
-        hh = tan(angle * M_PI / 180);
+        hh = tan(angle * M_PI / 360);
         hw = aspect * hh;
     }
     Ray rayAt(Ftype i, Ftype j, Ftype r, Ftype c) {
@@ -194,31 +194,52 @@ void toPPM (Color **img, int r, int c, string fname = "out.ppm") {
     fclose(fpt);
 }
 
+struct ProgressBar {
+    int n, w;
+    ProgressBar(int _w): w(_w) { n = 0; }
+    ~ProgressBar() { printf("\n"); }
+    void show() {
+        printf("\r[");
+        for (int i = 1; i <= w; i++)
+            if (i <= n) printf("=");
+            else printf(" ");
+        printf("] %3d%%", int(float(n) / float(w) * 100 + 0.9));
+        fflush(stdout);
+    }
+    void update(float nn) {
+        if (w * nn <= n) return;
+        n = w * nn + 0.9; show();
+    }
+};
+
 int main () {
-    int c = 200, r = 100;
+    ProgressBar progress(70);
+    int c = 1600, r = 900;
     Color **img = createImg(r, c);
     Camera cam {
         Vec (0, 1, 0),
-        Vec (0, 0, 0),
+        Vec (-1.5, 1, 0),
         Vec (0, 0, -1),
-        45, 2
+        90, 16.0 / 9.0
     };
     ObjList lst {
         new Sphere {Vec(0, 0, -1), 0.5, new Diffuse(Color(0.8, 0.3, 0.3))},
         new Sphere {Vec(1, 0, -1), 0.5, new Metal(Color(0.8, 0.6, 0.2), 0.1)},
         new Sphere {Vec(-1, 0, -1), 0.5, new Glass(2.0/3.0)},
-        //new Sphere {Vec(-1, 0, -1), 0.45, new Glass(1.5)},
+        new Sphere {Vec(-1, 0, -1), 0.45, new Glass(1.5)},
         new Sphere {Vec(0, -100.5, -1), 100, new Diffuse(Color(0.8, 0.8, 0))}
     };
-    for (int i = 0; i < r; i++)
+    for (int i = 0; i < r; i++) {
         for (int j = 0; j < c; j++) {
             img[i][j] = Color(0, 0, 0);
-            for (int s = 0; s < 20; s++)
+            for (int s = 0; s < 1; s++)
                 img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), lst);
-            img[i][j] /= 20.0;
+            img[i][j] /= 1.0;
             img[i][j] = Color(sqrt(img[i][j][0]), sqrt(img[i][j][1]), sqrt(img[i][j][2]));
             img[i][j] = img[i][j] * 255.99;
         }
+        progress.update(float(i) / float(r));
+    }
     toPPM(img, r, c);
     deleteImg(img, r);
     for (auto obj: lst) delete obj;
