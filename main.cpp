@@ -41,18 +41,28 @@ Ftype dot (const Vec &a, const Vec &b) {
 
 Vec cross (const Vec &a, const Vec &b) {
     return Vec(a[1] * b[2] - a[2] * b[1],
-               a[0] * b[2] - a[2] * b[0],
+               a[2] * b[0] - a[0] * b[2],
                a[0] * b[1] - a[1] * b[0]); }
 
 typedef Vec Color;
 
 struct Ray { Vec o, p; };
 
-inline Ray rayFromCam (Ftype i, Ftype j, Ftype r, Ftype c) {
-    Vec o(0, 0, 0);
-    Vec p(-2 + j / c * 4.0 , 1 - i / r * 2.0 , -1);
-    return Ray {o, p};
-}
+struct Camera {
+    Vec o, x, y, z;
+    Ftype hh, hw;
+    Camera(Vec up, Vec from, Vec at, Ftype angle, Ftype aspect) {
+        o = from;
+        z = (from - at) / (from - at).norm();
+        x = cross(up, z), x /= x.norm();
+        y = cross(z, x), y /= y.norm();
+        hh = tan(angle * M_PI / 180);
+        hw = aspect * hh;
+    }
+    Ray rayAt(Ftype i, Ftype j, Ftype r, Ftype c) {
+        return Ray {o, (-hw + j / c * 2 * hw) * x + (hh - i / r * 2 * hh) * y - z};
+    }
+};
 
 Vec randUnitBall() {
     Vec p;
@@ -80,7 +90,7 @@ struct Diffuse: Material {
 struct Metal: Material {
     Color albedo;
     Ftype fuzz;
-    Metal(Color _albedo, Ftype _fuzz = 0):albedo(_albedo), fuzz(_fuzz) { }
+    Metal(Color _albedo, Ftype _fuzz = 0): albedo(_albedo), fuzz(_fuzz) { }
     function<Color(const Color&)> scatter (const Vec& n, const Ray& in, Ray &out) {
         out.o = in.o;
         out.p = reflect(in.p, n) + fuzz * randUnitBall();
@@ -91,13 +101,13 @@ struct Metal: Material {
 Ftype reflectRatio(Ftype r, Ftype cos) { // Schlick's approximation
     Ftype R0 = (1 - r) / (1 + r);
     R0 = R0 * R0;
-    return R0 + (1 - R0) * pow(1 - cos, 5);
+    return R0 + (1 - R0) * pow(1 - cos, 5) ;
 }
 
 struct Glass: Material {
     Color albedo;
     Ftype ratio; // sin θt / sin θi == ni / nt
-    Glass(Ftype _ratio, Color _albedo = Vec(0.95, 0.95, 0.95)):albedo(_albedo), ratio(_ratio) { }
+    Glass(Ftype _ratio, Color _albedo = Vec(0.95, 0.95, 0.95)): albedo(_albedo), ratio(_ratio) { }
     function<Color(const Color&)> scatter (const Vec& n, const Ray& in, Ray &out) {
         Ftype r = dot(in.p, n) > 0 ? 1.0 / ratio : ratio;
         Vec pcos = dot(in.p, n) * n, psin = in.p - pcos;
@@ -123,7 +133,7 @@ typedef vector<Obj*> ObjList;
 struct Sphere: Obj {
     Vec o; Ftype r;
 
-    Sphere(Vec _o, Ftype _r, Material* mat):Obj(mat), o(_o), r(_r) {}
+    Sphere(Vec _o, Ftype _r, Material* mat): Obj(mat), o(_o), r(_r) {}
     
     Ftype hit (const Ray& ray) {
         Ftype a = dot(ray.p, ray.p);
@@ -187,19 +197,25 @@ void toPPM (Color **img, int r, int c, string fname = "out.ppm") {
 int main () {
     int c = 200, r = 100;
     Color **img = createImg(r, c);
+    Camera cam {
+        Vec (0, 1, 0),
+        Vec (0, 0, 0),
+        Vec (0, 0, -1),
+        45, 2
+    };
     ObjList lst {
         new Sphere {Vec(0, 0, -1), 0.5, new Diffuse(Color(0.8, 0.3, 0.3))},
         new Sphere {Vec(1, 0, -1), 0.5, new Metal(Color(0.8, 0.6, 0.2), 0.1)},
         new Sphere {Vec(-1, 0, -1), 0.5, new Glass(2.0/3.0)},
-        new Sphere {Vec(-1, 0, -1), 0.45, new Glass(1.5)},
+        //new Sphere {Vec(-1, 0, -1), 0.45, new Glass(1.5)},
         new Sphere {Vec(0, -100.5, -1), 100, new Diffuse(Color(0.8, 0.8, 0))}
     };
     for (int i = 0; i < r; i++)
         for (int j = 0; j < c; j++) {
             img[i][j] = Color(0, 0, 0);
-            for (int s = 0; s < 100; s++)
-                img[i][j] += rayTrace(rayFromCam(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), lst);
-            img[i][j] /= 100.0;
+            for (int s = 0; s < 20; s++)
+                img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), lst);
+            img[i][j] /= 20.0;
             img[i][j] = Color(sqrt(img[i][j][0]), sqrt(img[i][j][1]), sqrt(img[i][j][2]));
             img[i][j] = img[i][j] * 255.99;
         }
