@@ -149,6 +149,26 @@ struct Sphere: Obj {
     Vec n (const Vec& p) { return (p - o) / (p - o).norm(); }
 };
 
+struct Triangle: Obj {
+    Vec a, b, c, nor;
+
+    Triangle(Vec _a, Vec _b, Vec _c, Vec _nor, Material *mat): Obj(mat), nor(_nor), a(_a), b(_b), c(_c) {
+        nor /= nor.norm();
+        if (dot(cross(b - a, c - a), nor) < 0) swap(b, c);
+    }
+
+    Ftype hit (const Ray& ray) {
+        Ftype t = dot(a - ray.o, nor) / dot(ray.p, nor), eps = -0.0001;
+        Vec at = ray.o + ray.p * t;
+        if ( dot(cross(b - a, at - a), nor) >= eps &&
+             dot(cross(c - b, at - b), nor) >= eps &&
+             dot(cross(a - c, at - c), nor) >= eps    ) return t;
+        else return -1;
+    }
+
+    Vec n (const Vec& p) { return nor; }
+};
+
 
 Color rayTrace (Ray ray, ObjList& objs, int depth = 50) {
     ray.p = ray.p / ray.p.norm();
@@ -199,7 +219,7 @@ struct ProgressBar {
     ProgressBar(int _w): w(_w) { n = 0; }
     ~ProgressBar() { printf("\n"); }
     void show() {
-        printf("\r[");
+        printf("\r Rendering: [");
         for (int i = 1; i <= w; i++)
             if (i <= n) printf("=");
             else printf(" ");
@@ -218,7 +238,7 @@ int main () {
     Color **img = createImg(r, c);
     Camera cam {
         Vec (0, 1, 0),
-        Vec (-1.5, 1, 0),
+        Vec (0, 1, 0.5),
         Vec (0, 0, -1),
         90, 16.0 / 9.0
     };
@@ -227,14 +247,15 @@ int main () {
         new Sphere {Vec(1, 0, -1), 0.5, new Metal(Color(0.8, 0.6, 0.2), 0.1)},
         new Sphere {Vec(-1, 0, -1), 0.5, new Glass(2.0/3.0)},
         new Sphere {Vec(-1, 0, -1), 0.45, new Glass(1.5)},
-        new Sphere {Vec(0, -100.5, -1), 100, new Diffuse(Color(0.8, 0.8, 0))}
+        new Sphere {Vec(0, -100.5, -1), 100, new Diffuse(Color(0.8, 0.8, 0))},
+        new Triangle {Vec(-2, 0, -2), Vec(2, 0, -2), Vec(0, 2, -2), Vec(0, 0, 1), new Metal(Color(0.4, 0.2, 0.8), 0.01)}
     };
     for (int i = 0; i < r; i++) {
         for (int j = 0; j < c; j++) {
             img[i][j] = Color(0, 0, 0);
-            for (int s = 0; s < 1; s++)
-                img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), lst);
-            img[i][j] /= 1.0;
+            for (int s = 0; s < 10; s++)
+                img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), lst, 5);
+            img[i][j] /= 10.0;
             img[i][j] = Color(sqrt(img[i][j][0]), sqrt(img[i][j][1]), sqrt(img[i][j][2]));
             img[i][j] = img[i][j] * 255.99;
         }
