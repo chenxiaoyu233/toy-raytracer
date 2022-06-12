@@ -14,7 +14,7 @@ It would be better to levering advanced algorithm like BVH or hardwares like GPU
  
 * Show cases
 The following pictures were converted from .ppm files.
-1. tree balls
+1. three balls
    [[./three-balls.png]]
 2. little witch
    [[./little-witch.png]]
