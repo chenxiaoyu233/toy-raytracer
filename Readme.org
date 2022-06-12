@@ -1,5 +1,5 @@
 * Overview
-This is a toy ray tracer implemented by myself according to the book of Peter Shirley /"Ray Tracing in One Weekend"/.
+This is a toy ray tracer implemented by myself according to the book of Peter Shirley "Ray Tracing in One Weekend".
 It is quite interesting and it really just takes me a weekend.
 
 * Current functions.
@@ -13,10 +13,11 @@ The perfomance of this ray tracer is quite bad.
 It would be better to levering advanced algorithm like BVH or hardwares like GPU.
  
 * Show cases
+The following pictures were converted from .ppm files.
 1. tree balls
-   [[./three-balls.ppm]]
+   [[./three-balls.png]]
 2. little witch
-   [[./little-witch.ppm]]
+   [[./little-witch.png]]
 
 
 
