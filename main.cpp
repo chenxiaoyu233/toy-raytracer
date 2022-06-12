@@ -220,7 +220,7 @@ struct ProgressBar {
     ProgressBar(int _w): w(_w) { n = 0; }
     ~ProgressBar() { printf("\n"); }
     void show() {
-        printf("\r Rendering: [");
+        printf("\rRendering: [");
         for (int i = 1; i <= w; i++)
             if (i <= n) printf("=");
             else printf(" ");
@@ -269,30 +269,39 @@ int main () {
     ProgressBar progress(70);
     int c = 1600, r = 900;
     Color **img = createImg(r, c);
+
+    // scene: tree-balls
+    //Camera cam {
+    //    Vec (0, 1, 0),
+    //    Vec (-1.25, 0.8, 0.6),
+    //    Vec (0, 0, -1),
+    //    90, 16.0 / 9.0
+    //};
+    //ObjList objs {
+    //    new Sphere {Vec(0, 0, -1), 0.5, new Diffuse(Color(0.8, 0.3, 0.3))},
+    //    new Sphere {Vec(1, 0, -1), 0.5, new Metal(Color(0.8, 0.6, 0.2), 0.1)},
+    //    new Sphere {Vec(-1, 0, -1), 0.5, new Glass(2.0/3.0)},
+    //    new Sphere {Vec(-1, 0, -1), 0.45, new Glass(1.5)},
+    //    new Sphere {Vec(0, -100.5, -1), 100, new Diffuse(Color(0.8, 0.8, 0))},
+    //};
+
+    // scene: little-witch
+    ObjList objs;
+    readBinarySTL("little-witch.stl", objs);
+    objs.push_back(new Sphere {Vec(0, 0, -10000.5), 10000, new Diffuse(Color(0.8, 0.8, 0))});
     Camera cam {
         Vec (0, 0, 1),
         Vec (-1, -30, 25),
         Vec (-1.726, 19.175, 18.6763),
         90, 16.0 / 9.0
     };
-    /*
-    ObjList objs {
-        new Sphere {Vec(0, 0, -1), 0.5, new Diffuse(Color(0.8, 0.3, 0.3))},
-        new Sphere {Vec(1, 0, -1), 0.5, new Metal(Color(0.8, 0.6, 0.2), 0.1)},
-        new Sphere {Vec(-1, 0, -1), 0.5, new Glass(2.0/3.0)},
-        new Sphere {Vec(-1, 0, -1), 0.45, new Glass(1.5)},
-        new Sphere {Vec(0, -100.5, -1), 100, new Diffuse(Color(0.8, 0.8, 0))},
-        new Triangle {Vec(-2, 0, -2), Vec(2, 0, -2), Vec(0, 2, -2), Vec(0, 0, 1), new Metal(Color(0.4, 0.2, 0.8), 0.01)}
-        }; */
-    ObjList objs;
-    readBinarySTL("little-witch.stl", objs);
-    objs.push_back(new Sphere {Vec(0, 0, -10000.5), 10000, new Diffuse(Color(0.8, 0.8, 0))});
+
     for (int i = 0; i < r; i++) {
         for (int j = 0; j < c; j++) {
             img[i][j] = Color(0, 0, 0);
-            for (int s = 0; s < 4; s++)
-                img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), objs, 10);
-            img[i][j] /= 4.0;
+            for (int s = 0; s < 10; s++)
+                img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), objs, 20);
+            img[i][j] /= 10.0;
             img[i][j] = Color(sqrt(img[i][j][0]), sqrt(img[i][j][1]), sqrt(img[i][j][2]));
             img[i][j] = img[i][j] * 255.99;
             progress.update(float(i * c + j) / float(r * c));
