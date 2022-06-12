@@ -1,0 +1,22 @@
+* Overview
+This is a toy ray tracer implemented by myself according to the book of Peter Shirley /"Ray Tracing in One Weekend"/.
+It is quite interesting and it really just takes me a weekend.
+
+* Current functions.
+This ray tracer support spheres and triangles with materials like _Diffuse_, _Glass_, _Metal_.
+It also has some small functions that is of my own interests:
+  - a progress bar for rendering large model;
+  - a simple parser for a simple 3D model file format called ".stl".
+
+* Future directions
+The perfomance of this ray tracer is quite bad.
+It would be better to levering advanced algorithm like BVH or hardwares like GPU.
+ 
+* Show cases
+1. tree balls
+   [[./three-balls.ppm]]
+2. little witch
+   [[./little-witch.ppm]]
+
+
+
