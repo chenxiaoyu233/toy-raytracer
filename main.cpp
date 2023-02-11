@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdlib>
 #include <functional>
+#include <algorithm>
 using namespace std;
 
 typedef float Ftype;
@@ -22,9 +23,9 @@ struct Vec {
     Vec& operator *= (const Vec &b) { w[0] *= b[0]; w[1] *= b[1]; w[2] *= b[2]; return *this; }
     Vec& operator /= (const Vec &b) { w[0] /= b[0]; w[1] /= b[1]; w[2] /= b[2]; return *this; }
     Ftype norm () { return sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]); }
-    Ftype x () { return w[0]; }
-    Ftype y () { return w[1]; }
-    Ftype z () { return w[2]; }
+    Ftype x () const { return w[0]; }
+    Ftype y () const { return w[1]; }
+    Ftype z () const { return w[2]; }
 };
 
 Vec operator + (const Vec &a, const Vec &b) { return Vec(a[0] + b[0], a[1] + b[1], a[2] + b[2]); }
@@ -122,32 +123,142 @@ struct Glass: Material {
     }
 };
 
+struct BBox {
+    Vec lb, ub;
+
+    static BBox merge (const BBox &a, const BBox &b) {
+        return BBox{
+            Vec(min(a.lb.x(), b.lb.x()), min(a.lb.y(), b.lb.y()), min(a.lb.z(), b.lb.z())), 
+            Vec(max(a.ub.x(), b.ub.x()), max(a.ub.y(), b.ub.y()), max(a.ub.z(), b.ub.z()))
+        };
+    }
+};
+
+struct Obj;
+
+struct HitRecord {
+    Ftype t;
+    Obj* obj;
+};
+
 struct Obj {
     Material *mat;
     Obj(Material *_mat):mat(_mat){ }
     virtual ~Obj() {}
-    virtual Ftype hit (const Ray& ray) = 0;
+    virtual HitRecord hit (const Ray& ray) = 0;
     virtual Vec n (const Vec& p) = 0;
+    virtual BBox calcBBox () const = 0;
 };
 typedef vector<Obj*> ObjList;
+
+struct BVHnode: Obj {
+    BBox box;
+    Obj *lson, *rson;
+
+    BVHnode():Obj(NULL){ }
+
+    Vec n (const Vec& p) { return Vec(0, 0, 0); }
+
+    bool hitBox(const Ray& ray) {
+        auto interval = [=] (int axis) -> pair<Ftype, Ftype> {
+            Ftype inv = 1.0f / ray.p[axis];
+            Ftype t0 = (box.lb.w[axis] - ray.o.w[axis]) * inv;
+            Ftype t1 = (box.ub.w[axis] - ray.o.w[axis]) * inv;
+            if (inv < 0.0f) swap(t0, t1);
+            return make_pair(t0, t1);
+        };
+        pair<Ftype, Ftype> pr = interval(0);
+        for (int i = 1; i <= 2; ++i) {
+            pair<Ftype, Ftype> tmp = interval(i);
+            pr.first = tmp.first > pr.first ? tmp.first : pr.first;
+            pr.second = tmp.second < pr.second ? tmp.second : pr.second;
+            if (pr.second <= pr.first) return false;
+        }
+        return true;
+    }
+
+    HitRecord hit (const Ray& ray) { 
+        HitRecord rt{-1, NULL};
+        if (!hitBox(ray)) return rt;
+        auto update = [&] (HitRecord tmp) -> void {
+            if (tmp.obj != NULL && tmp.t > 0.005 
+                    && (tmp.t < rt.t || rt.obj == NULL)) rt = tmp;
+        };
+        if (lson != NULL) update(lson -> hit(ray));
+        if (rson != NULL) update(rson -> hit(ray));
+        return rt;
+    }
+
+    BBox calcBBox() const { return box; }
+};
+
+struct BVH {
+    Obj* root;
+    ObjList nodePool;
+
+    HitRecord hit (const Ray& ray) { return root -> hit(ray); }
+
+    Obj* build(ObjList& objs, bool isRoot = true) {
+        if (objs.size() == 0) return NULL;
+        if (objs.size() == 1) return objs[0];
+
+        int axis = rand() % 3;
+        auto cmp = [=] (const Obj* a, const Obj* b) -> bool {
+            return (a -> calcBBox()).lb.w[axis] < (b -> calcBBox()).lb.w[axis];
+        };
+        sort(objs.begin(), objs.end(), cmp);
+
+        BVHnode* rt = new BVHnode;
+        if (isRoot) root = rt;
+        nodePool.push_back(rt);
+        rt -> box = objs[0] -> calcBBox();
+        for (auto obj: objs) 
+            rt -> box = BBox::merge(rt -> box, obj -> calcBBox());
+
+        ObjList half; 
+        size_t m = objs.size() >> 1;
+
+        half.clear();
+        for (size_t i = 0; i < m; ++i) half.push_back(objs[i]);
+        rt -> lson = build(half, false);
+
+        half.clear();
+        for (size_t i = m; i < objs.size(); ++i) half.push_back(objs[i]);
+        rt -> rson = build(half, false);
+
+        return rt;
+    }
+
+    void clear() {
+        for (auto pt: nodePool) delete pt;
+        nodePool.clear();
+    }
+
+     BVH (ObjList &objs) { build(objs); }
+    ~BVH () { clear(); }
+};
 
 struct Sphere: Obj {
     Vec o; Ftype r;
 
     Sphere(Vec _o, Ftype _r, Material* mat): Obj(mat), o(_o), r(_r) {}
     
-    Ftype hit (const Ray& ray) {
+    HitRecord hit (const Ray& ray) {
         Ftype a = dot(ray.p, ray.p);
         Ftype b = 2.0 * dot(ray.p, ray.o - o);
         Ftype c = dot(ray.o - o, ray.o - o) - r * r;
         Ftype d = b * b - 4 * a * c;
-        if (d < 0) return -1;
+        if (d < 0) return HitRecord{-1, this};
         Ftype t1 = (-b + sqrt(d)) / (2 * a);
         Ftype t2 = (-b - sqrt(d)) / (2 * a);
-        return t2 > 0.001 ? t2 : t1;
+        return t2 > 0.001 ? HitRecord{t2, this} : HitRecord{t1, this};
     }
 
     Vec n (const Vec& p) { return (p - o) / (p - o).norm(); }
+
+    BBox calcBBox() const {
+        return BBox {o - r * Vec(1, 1, 1), o + r * Vec(1, 1, 1)};
+    }
 };
 
 struct Triangle: Obj {
@@ -158,24 +269,28 @@ struct Triangle: Obj {
         if (dot(cross(b - a, c - a), nor) < 0) swap(b, c);
     }
 
-    Ftype hit (const Ray& ray) {
+    HitRecord hit (const Ray& ray) {
         Ftype t = dot(a - ray.o, nor) / dot(ray.p, nor), eps = -0.0001;
         Vec at = ray.o + ray.p * t;
         if ( dot(cross(b - a, at - a), nor) >= eps &&
              dot(cross(c - b, at - b), nor) >= eps &&
-             dot(cross(a - c, at - c), nor) >= eps    ) return t;
-        else return -1;
+             dot(cross(a - c, at - c), nor) >= eps    ) return HitRecord{t, this};
+        else return HitRecord{-1, this};
     }
 
     Vec n (const Vec& p) { return nor; }
+
+    BBox calcBBox() const {
+        return BBox::merge(BBox{a, a}, BBox::merge(BBox{b, b}, BBox{c, c}));
+    }
 };
 
-
+// broute force ray tracing
 Color rayTrace (Ray ray, ObjList& objs, int depth = 50) {
     ray.p = ray.p / ray.p.norm();
     Ftype t = -1.0; Obj* cur = NULL;
     for (auto &obj: objs) {
-        Ftype tmp = obj -> hit(ray);
+        Ftype tmp = (obj -> hit(ray)).t;
         if (tmp > 0.001 && (tmp < t || cur == NULL))
             t = tmp, cur = obj; 
     }
@@ -189,6 +304,22 @@ Color rayTrace (Ray ray, ObjList& objs, int depth = 50) {
     }
     t = 0.5 * (ray.p.y() + 1.0);
     return (1.0 - t) * Color(1.0, 1.0, 1.0) + t * Color(0.5, 0.7, 1.0);
+}
+
+// ray tracing using Bounding Volumes Hierarchies
+Color rayTrace (Ray ray, BVH& bvh, int depth = 50) {
+    ray.p = ray.p / ray.p.norm();
+    HitRecord rec = bvh.hit(ray);
+    if (rec.obj == NULL){
+        Ftype t = 0.5 * (ray.p.y() + 1.0);
+        return (1.0 - t) * Color(1.0, 1.0, 1.0) + t * Color(0.5, 0.7, 1.0);
+    }
+    Vec at = ray.o + ray.p * rec.t;
+    Vec n = rec.obj -> n(at);
+    Ray out, in {at, ray.p};
+    auto col = rec.obj -> mat -> scatter(n, in, out);
+    if (depth > 0) return col(rayTrace(out, bvh, depth - 1));
+    else return Color(0, 0, 0);
 }
 
 Color** createImg (int r, int c) {
@@ -296,12 +427,14 @@ int main () {
         90, 16.0 / 9.0
     };
 
+    BVH bvh(objs);
+
     for (int i = 0; i < r; i++) {
         for (int j = 0; j < c; j++) {
             img[i][j] = Color(0, 0, 0);
-            for (int s = 0; s < 10; s++)
-                img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), objs, 20);
-            img[i][j] /= 10.0;
+            for (int s = 0; s < 50; s++)
+                img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), bvh, 20);
+            img[i][j] /= 50.0;
             img[i][j] = Color(sqrt(img[i][j][0]), sqrt(img[i][j][1]), sqrt(img[i][j][2]));
             img[i][j] = img[i][j] * 255.99;
             progress.update(float(i * c + j) / float(r * c));

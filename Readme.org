@@ -1,10 +1,10 @@
 * Overview
-This is a toy ray tracer implemented by myself according to the book of Peter Shirley "Ray Tracing in One Weekend".
-It is quite interesting and it really just takes me a weekend.
+This is a toy ray tracer implemented by myself according to the series of books "Ray Tracing in One Weekend" written by Peter Shirley.
 
 * Current functions.
-This ray tracer support spheres and triangles with materials like _Diffuse_, _Glass_, _Metal_.
-It also has some small functions that is of my own interests:
+1. This ray tracer support spheres and triangles with materials like _Diffuse_, _Glass_, _Metal_.
+2. Use the Bounding Volumes Hierarchies (similar to the kd-tree) to speed up the running time.
+3. It also has some small functions that is of my own interests:
   - a progress bar for rendering large model;
   - a simple parser for a simple 3D model file format called ".stl".
 
