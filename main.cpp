@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <functional>
 #include <algorithm>
+#include <map>
 using namespace std;
 
 typedef float Ftype;
@@ -52,13 +53,17 @@ struct Ray { Vec o, p; };
 struct Camera {
     Vec o, x, y, z;
     Ftype hh, hw;
-    Camera(Vec up, Vec from, Vec at, Ftype angle, Ftype aspect) {
+    void setup(Vec up, Vec from, Vec at, Ftype angle, Ftype aspect) {
         o = from;
         z = (from - at) / (from - at).norm();
         x = cross(up, z), x /= x.norm();
         y = cross(z, x), y /= y.norm();
         hh = tan(angle * M_PI / 360);
         hw = aspect * hh;
+    }
+    Camera() { }
+    Camera(Vec up, Vec from, Vec at, Ftype angle, Ftype aspect) {
+        setup(up, from, at, angle, aspect);
     }
     Ray rayAt(Ftype i, Ftype j, Ftype r, Ftype c) {
         return Ray {o, (-hw + j / c * 2 * hw) * x + (hh - i / r * 2 * hh) * y - z};
@@ -74,53 +79,11 @@ Vec randUnitBall() {
 
 Vec reflect (const Vec& p, const Vec& n) { return p - 2 * dot(p, n) * n; }
 
-struct Material {
-    virtual ~Material() { }
-    virtual function<Color(const Color&)> scatter (const Vec& n, const Ray& in, Ray& out) = 0;
-};
+struct Obj;
 
-struct Diffuse: Material {
-    Color albedo;
-    Diffuse(Color _albedo):albedo(_albedo) { }
-    function<Color(const Color&)> scatter (const Vec& n, const Ray& in, Ray& out) {
-        out.o = in.o;
-        out.p = n + randUnitBall();
-        return [=] (const Color& incol) -> Color { return albedo * incol; };
-    }
-};
-
-struct Metal: Material {
-    Color albedo;
-    Ftype fuzz;
-    Metal(Color _albedo, Ftype _fuzz = 0): albedo(_albedo), fuzz(_fuzz) { }
-    function<Color(const Color&)> scatter (const Vec& n, const Ray& in, Ray &out) {
-        out.o = in.o;
-        out.p = reflect(in.p, n) + fuzz * randUnitBall();
-        return [=] (const Color& incol) -> Color { return (dot(out.p, n) > 0) * albedo * incol; };
-    }
-};
-
-Ftype reflectRatio(Ftype r, Ftype cos) { // Schlick's approximation
-    Ftype R0 = (1 - r) / (1 + r);
-    R0 = R0 * R0;
-    return R0 + (1 - R0) * pow(1 - cos, 5) ;
-}
-
-struct Glass: Material {
-    Color albedo;
-    Ftype ratio; // sin θt / sin θi == ni / nt
-    Glass(Ftype _ratio, Color _albedo = Vec(0.95, 0.95, 0.95)): albedo(_albedo), ratio(_ratio) { }
-    function<Color(const Color&)> scatter (const Vec& n, const Ray& in, Ray &out) {
-        Ftype r = dot(in.p, n) > 0 ? 1.0 / ratio : ratio;
-        Vec pcos = dot(in.p, n) * n, psin = in.p - pcos;
-        Ftype cos = pcos.norm(), sin = psin.norm();
-        Ftype nsin = sin * r, ncos = sqrt(1 - nsin * nsin);
-        
-        out.o = in.o;
-        if (nsin >= 1 || drand48() < reflectRatio(r, cos)) out.p = reflect(in.p, n);
-        else out.p = pcos * ncos / cos + psin * nsin / sin;
-        return [=] (const Color& incol) -> Color { return  albedo * incol; };
-    }
+struct HitRecord {
+    Ftype t;
+    Obj* obj;
 };
 
 struct BBox {
@@ -134,22 +97,27 @@ struct BBox {
     }
 };
 
-struct Obj;
-
-struct HitRecord {
-    Ftype t;
-    Obj* obj;
-};
+struct Material;
 
 struct Obj {
     Material *mat;
     Obj(Material *_mat):mat(_mat){ }
     virtual ~Obj() {}
     virtual HitRecord hit (const Ray& ray) = 0;
-    virtual Vec n (const Vec& p) = 0;
+    virtual Vec n (const Vec& p) const = 0;
     virtual BBox calcBBox () const = 0;
 };
 typedef vector<Obj*> ObjList;
+
+struct Texture {
+    virtual ~Texture() { }
+    virtual Color color(const Obj* obj, Vec p) = 0;
+};
+
+struct Material {
+    virtual ~Material() { }
+    virtual function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray& out) = 0;
+};
 
 struct BVHnode: Obj {
     BBox box;
@@ -157,7 +125,7 @@ struct BVHnode: Obj {
 
     BVHnode():Obj(NULL){ }
 
-    Vec n (const Vec& p) { return Vec(0, 0, 0); }
+    Vec n (const Vec& p) const { return Vec(0, 0, 0); }
 
     bool hitBox(const Ray& ray) {
         auto interval = [=] (int axis) -> pair<Ftype, Ftype> {
@@ -238,6 +206,71 @@ struct BVH {
     ~BVH () { clear(); }
 };
 
+struct SolidColor: Texture {
+    Color col;
+    SolidColor(Color _col): col(_col) { }
+    Color color(const Obj *obj, Vec p) { return col; }
+};
+
+struct CheckerTexture: Texture {
+    Texture *odd, *even;
+    CheckerTexture(Texture* _odd, Texture* _even): odd(_odd), even(_even) { }
+    Color color(const Obj * obj, Vec p) {
+        Ftype sines = sin(10 * p.x()) * sin(10 * p.y()) * sin(10 * p.z());
+        return sines < 0 ? odd -> color(obj, p) : even -> color(obj, p);
+    }
+};
+
+struct Diffuse: Material {
+    Texture* albedo;
+    Diffuse(Texture* _albedo):albedo(_albedo) { }
+    function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray& out) {
+        Vec n = obj -> n(in.o);
+        out.o = in.o;
+        out.p = n + randUnitBall();
+        return [=] (const Color& incol) -> Color { return albedo -> color(obj, in.o) * incol; };
+    }
+};
+
+struct Metal: Material {
+    Texture* albedo;
+    Ftype fuzz;
+    Metal(Texture* _albedo, Ftype _fuzz = 0): albedo(_albedo), fuzz(_fuzz) { }
+    function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray &out) {
+        Vec n = obj -> n(in.o);
+        out.o = in.o;
+        out.p = reflect(in.p, n) + fuzz * randUnitBall();
+        return [=] (const Color& incol) -> Color { 
+            return (dot(out.p, n) > 0) * albedo -> color(obj, in.o) * incol; 
+        };
+    }
+};
+
+Ftype reflectRatio(Ftype r, Ftype cos) { // Schlick's approximation
+    Ftype R0 = (1 - r) / (1 + r);
+    R0 = R0 * R0;
+    return R0 + (1 - R0) * pow(1 - cos, 5) ;
+}
+
+struct Glass: Material {
+    Color albedo;
+    Ftype ratio; // sin θt / sin θi == ni / nt
+    Glass(Ftype _ratio, Color _albedo = Vec(0.95, 0.95, 0.95)): albedo(_albedo), ratio(_ratio) { }
+    function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray &out) {
+        Vec n = obj -> n(in.o);
+        Ftype r = dot(in.p, n) > 0 ? 1.0 / ratio : ratio;
+        Vec pcos = dot(in.p, n) * n, psin = in.p - pcos;
+        Ftype cos = pcos.norm(), sin = psin.norm();
+        Ftype nsin = sin * r, ncos = sqrt(1 - nsin * nsin);
+        
+        out.o = in.o;
+        if (nsin >= 1 || drand48() < reflectRatio(r, cos)) out.p = reflect(in.p, n);
+        else out.p = pcos * ncos / cos + psin * nsin / sin;
+        return [=] (const Color& incol) -> Color { return  albedo * incol; };
+    }
+};
+
+
 struct Sphere: Obj {
     Vec o; Ftype r;
 
@@ -254,7 +287,7 @@ struct Sphere: Obj {
         return t2 > 0.001 ? HitRecord{t2, this} : HitRecord{t1, this};
     }
 
-    Vec n (const Vec& p) { return (p - o) / (p - o).norm(); }
+    Vec n (const Vec& p) const { return (p - o) / (p - o).norm(); }
 
     BBox calcBBox() const {
         return BBox {o - r * Vec(1, 1, 1), o + r * Vec(1, 1, 1)};
@@ -278,7 +311,7 @@ struct Triangle: Obj {
         else return HitRecord{-1, this};
     }
 
-    Vec n (const Vec& p) { return nor; }
+    Vec n (const Vec& p) const { return nor; }
 
     BBox calcBBox() const {
         return BBox::merge(BBox{a, a}, BBox::merge(BBox{b, b}, BBox{c, c}));
@@ -296,9 +329,8 @@ Color rayTrace (Ray ray, ObjList& objs, int depth = 50) {
     }
     if (cur != NULL) {
         Vec at = ray.o + ray.p * t;
-        Vec n = cur -> n(at);
         Ray out, in {at, ray.p};
-        auto col = cur -> mat -> scatter(n, in, out);
+        auto col = cur -> mat -> scatter(cur, in, out);
         if (depth > 0) return col(rayTrace(out, objs, depth - 1));
         else return Color(0, 0, 0);
     }
@@ -315,9 +347,8 @@ Color rayTrace (Ray ray, BVH& bvh, int depth = 50) {
         return (1.0 - t) * Color(1.0, 1.0, 1.0) + t * Color(0.5, 0.7, 1.0);
     }
     Vec at = ray.o + ray.p * rec.t;
-    Vec n = rec.obj -> n(at);
     Ray out, in {at, ray.p};
-    auto col = rec.obj -> mat -> scatter(n, in, out);
+    auto col = rec.obj -> mat -> scatter(rec.obj, in, out);
     if (depth > 0) return col(rayTrace(out, bvh, depth - 1));
     else return Color(0, 0, 0);
 }
@@ -364,7 +395,7 @@ struct ProgressBar {
     }
 };
 
-void readBinarySTL(string filename, ObjList& objs) {
+void readBinarySTL(string filename, ObjList& objs, Material* mat) {
     FILE *f = fopen(filename.c_str(), "rb");
 
     // get size of the buffer
@@ -384,7 +415,7 @@ void readBinarySTL(string filename, ObjList& objs) {
                 Vec(flt(6), flt(7), flt(8)),
                 Vec(flt(9), flt(10), flt(11)),
                 Vec(flt(0), flt(1), flt(2)),
-                new Diffuse(Color(0.3, 0.2, 0.8))
+                mat
             }
         );
     }
@@ -400,41 +431,66 @@ int main () {
     ProgressBar progress(70);
     int c = 1600, r = 900;
     Color **img = createImg(r, c);
+    map<string, Texture*> textures;
+    map<string, Material*> materials;
 
-    // scene: tree-balls
-    //Camera cam {
-    //    Vec (0, 1, 0),
-    //    Vec (-1.25, 0.8, 0.6),
-    //    Vec (0, 0, -1),
-    //    90, 16.0 / 9.0
-    //};
-    //ObjList objs {
-    //    new Sphere {Vec(0, 0, -1), 0.5, new Diffuse(Color(0.8, 0.3, 0.3))},
-    //    new Sphere {Vec(1, 0, -1), 0.5, new Metal(Color(0.8, 0.6, 0.2), 0.1)},
-    //    new Sphere {Vec(-1, 0, -1), 0.5, new Glass(2.0/3.0)},
-    //    new Sphere {Vec(-1, 0, -1), 0.45, new Glass(1.5)},
-    //    new Sphere {Vec(0, -100.5, -1), 100, new Diffuse(Color(0.8, 0.8, 0))},
-    //};
+    // Textures
+    textures["pink"] = new SolidColor(Color(0.8, 0.3, 0.3));
+    textures["brown"] = new SolidColor(Color(0.8, 0.6, 0.2));
+    textures["green"] = new SolidColor(Color(0.8, 0.8, 0.0));
+    textures["purple"] = new SolidColor(Color(0.3, 0.2, 0.8));
+    textures["checker"] = new CheckerTexture(textures["green"], textures["brown"]);
 
-    // scene: little-witch
+    // Materials
+    materials["diffuse-pink"] = new Diffuse(textures["pink"]);
+    materials["diffuse-green"] = new Diffuse(textures["green"]);
+    materials["diffuse-purple"] = new Diffuse(textures["purple"]);
+    materials["diffuse-checker"] = new Diffuse(textures["checker"]);
+    materials["metal"] = new Metal(textures["purple"]);
+    materials["glass-outer"] = new Glass(2.0/3.0);
+    materials["glass-inner"] = new Glass(1.5);
+
+    // Scens
     ObjList objs;
-    readBinarySTL("little-witch.stl", objs);
-    objs.push_back(new Sphere {Vec(0, 0, -10000.5), 10000, new Diffuse(Color(0.8, 0.8, 0))});
-    Camera cam {
-        Vec (0, 0, 1),
-        Vec (-1, -30, 25),
-        Vec (-1.726, 19.175, 18.6763),
-        90, 16.0 / 9.0
-    };
+    Camera cam;
+    //
+    switch(1) {
+        // scene: tree-balls
+        case 1:
+            cam = Camera {
+                Vec (0, 1, 0),
+                Vec (-1.25, 0.8, 0.6),
+                Vec (0, 0, -1),
+                90, 16.0 / 9.0
+            };
+            objs.push_back(new Sphere {Vec(0, 0, -1), 0.5, materials["diffuse-pink"]});
+            objs.push_back(new Sphere {Vec(1, 0, -1), 0.5, materials["metal"]});
+            objs.push_back(new Sphere {Vec(-1, 0, -1), 0.5, materials["glass-outer"]});
+            objs.push_back(new Sphere {Vec(-1, 0, -1), 0.45, materials["glass-inner"]});
+            objs.push_back(new Sphere {Vec(0, -100.5, -1), 100, materials["diffuse-checker"]});
+            break;
+
+        // scene: little-witch
+        case 2:
+            readBinarySTL("little-witch.stl", objs, materials["metal"]);
+            objs.push_back(new Sphere {Vec(0, 0, -10000.5), 10000, materials["diffuse-green"]});
+            cam = Camera {
+                Vec (0, 0, 1),
+                Vec (-1, -30, 25),
+                Vec (-1.726, 19.175, 18.6763),
+                90, 16.0 / 9.0
+            };
+            break;
+    }
 
     BVH bvh(objs);
 
     for (int i = 0; i < r; i++) {
         for (int j = 0; j < c; j++) {
             img[i][j] = Color(0, 0, 0);
-            for (int s = 0; s < 50; s++)
+            for (int s = 0; s < 100; s++)
                 img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), bvh, 20);
-            img[i][j] /= 50.0;
+            img[i][j] /= 100.0;
             img[i][j] = Color(sqrt(img[i][j][0]), sqrt(img[i][j][1]), sqrt(img[i][j][2]));
             img[i][j] = img[i][j] * 255.99;
             progress.update(float(i * c + j) / float(r * c));
@@ -442,10 +498,9 @@ int main () {
     }
     toPPM(img, r, c);
     deleteImg(img, r);
-    for (auto obj: objs) {
-        delete obj -> mat;
-        delete obj;
-    }
+    for (auto obj: objs) delete obj;
+    for (auto tp: materials) delete tp.second;
+    for (auto tp: textures) delete tp.second;
     return 0;
 }
 
