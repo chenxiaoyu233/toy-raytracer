@@ -208,11 +208,11 @@ struct BVH {
 
 struct PerlinNoise {
     const int pt_cnt = 256;
-    std::vector<Ftype> rands;
+    std::vector<Vec> randv;
     std::vector<int> perm[3];
     PerlinNoise() {
-        rands.resize(pt_cnt);
-        for (int i = 0; i < pt_cnt; ++i) rands[i] = drand48();
+        randv.resize(pt_cnt);
+        for (int i = 0; i < pt_cnt; ++i) randv[i] = randUnitBall();
         for (int i = 0; i < 3; ++i) {
             perm[i].resize(pt_cnt);
             for (int j = 0; j < pt_cnt; ++j) perm[i][j] = j;
@@ -221,16 +221,47 @@ struct PerlinNoise {
         }
     }
     Ftype noise(const Vec& p) {
-        int x = int(40 * p.x()) & 255;
-        int y = int(40 * p.y()) & 255;
-        int z = int(40 * p.z()) & 255;
-        return rands[perm[0][x] ^ perm[1][y] ^ perm[2][z]];
+        Ftype u = p.x() - floor(p.x());
+        Ftype v = p.y() - floor(p.y());
+        Ftype w = p.z() - floor(p.z());
+        int x = int(floor(p.x()));
+        int y = int(floor(p.y()));
+        int z = int(floor(p.z()));
+
+        // rand vec on the grid
+        auto gvec = [=] (int i, int j, int k) -> Vec {
+            return randv[
+                perm[0][(x + i) & 255] ^ 
+                perm[1][(y + j) & 255] ^ 
+                perm[2][(z + k) & 255]
+            ];
+        };
+
+       // smooth
+       u = u * u * (3 - 2 * u);
+       v = v * v * (3 - 2 * v);
+       w = w * w * (3 - 2 * w);
+
+       Ftype ret = 0;
+       for (int i = 0; i <= 1; ++i)
+           for (int j = 0; j <= 1; ++j)
+               for (int k = 0; k <= 1; ++k) {
+                   ret += (i * u + (1 - i) * (1 - u))
+                        * (j * v + (1 - j) * (1 - v))
+                        * (k * w + (1 - k) * (1 - w))
+                        * dot( gvec(i, j, k), Vec(u - i, v - j, w - k) );
+               }
+       return ret;
     }
 };
 
 struct NoiseTexture: Texture {
     PerlinNoise perlin;
-    Color color(const Obj *obj, Vec p) { return perlin.noise(p) * Color(1, 1, 1); }
+    Ftype scale;
+    NoiseTexture(Ftype _scale = 40): scale(_scale) { }
+    Color color(const Obj *obj, Vec p) { 
+        return Color(1, 1, 1) * 0.5 * (1.0 + perlin.noise(scale * p));
+    }
 };
 
 struct SolidColor: Texture {
