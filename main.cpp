@@ -279,6 +279,11 @@ struct CheckerTexture: Texture {
     }
 };
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+struct ImageTexture: Texture {
+};
+
 struct Diffuse: Material {
     Texture* albedo;
     Diffuse(Texture* _albedo):albedo(_albedo) { }
