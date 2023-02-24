@@ -7,7 +7,7 @@
 #include <functional>
 #include <algorithm>
 #include <map>
-using namespace std;
+#include <random>
 
 typedef float Ftype;
 
@@ -91,8 +91,8 @@ struct BBox {
 
     static BBox merge (const BBox &a, const BBox &b) {
         return BBox{
-            Vec(min(a.lb.x(), b.lb.x()), min(a.lb.y(), b.lb.y()), min(a.lb.z(), b.lb.z())), 
-            Vec(max(a.ub.x(), b.ub.x()), max(a.ub.y(), b.ub.y()), max(a.ub.z(), b.ub.z()))
+            Vec(std::min(a.lb.x(), b.lb.x()), std::min(a.lb.y(), b.lb.y()), std::min(a.lb.z(), b.lb.z())), 
+            Vec(std::max(a.ub.x(), b.ub.x()), std::max(a.ub.y(), b.ub.y()), std::max(a.ub.z(), b.ub.z()))
         };
     }
 };
@@ -107,7 +107,7 @@ struct Obj {
     virtual Vec n (const Vec& p) const = 0;
     virtual BBox calcBBox () const = 0;
 };
-typedef vector<Obj*> ObjList;
+typedef std::vector<Obj*> ObjList;
 
 struct Texture {
     virtual ~Texture() { }
@@ -116,7 +116,7 @@ struct Texture {
 
 struct Material {
     virtual ~Material() { }
-    virtual function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray& out) = 0;
+    virtual std::function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray& out) = 0;
 };
 
 struct BVHnode: Obj {
@@ -128,16 +128,16 @@ struct BVHnode: Obj {
     Vec n (const Vec& p) const { return Vec(0, 0, 0); }
 
     bool hitBox(const Ray& ray) {
-        auto interval = [=] (int axis) -> pair<Ftype, Ftype> {
+        auto interval = [=] (int axis) -> std::pair<Ftype, Ftype> {
             Ftype inv = 1.0f / ray.p[axis];
             Ftype t0 = (box.lb.w[axis] - ray.o.w[axis]) * inv;
             Ftype t1 = (box.ub.w[axis] - ray.o.w[axis]) * inv;
-            if (inv < 0.0f) swap(t0, t1);
-            return make_pair(t0, t1);
+            if (inv < 0.0f) std::swap(t0, t1);
+            return std::make_pair(t0, t1);
         };
-        pair<Ftype, Ftype> pr = interval(0);
+        std::pair<Ftype, Ftype> pr = interval(0);
         for (int i = 1; i <= 2; ++i) {
-            pair<Ftype, Ftype> tmp = interval(i);
+            std::pair<Ftype, Ftype> tmp = interval(i);
             pr.first = tmp.first > pr.first ? tmp.first : pr.first;
             pr.second = tmp.second < pr.second ? tmp.second : pr.second;
             if (pr.second <= pr.first) return false;
@@ -206,6 +206,33 @@ struct BVH {
     ~BVH () { clear(); }
 };
 
+struct PerlinNoise {
+    const int pt_cnt = 256;
+    std::vector<Ftype> rands;
+    std::vector<int> perm[3];
+    PerlinNoise() {
+        rands.resize(pt_cnt);
+        for (int i = 0; i < pt_cnt; ++i) rands[i] = drand48();
+        for (int i = 0; i < 3; ++i) {
+            perm[i].resize(pt_cnt);
+            for (int j = 0; j < pt_cnt; ++j) perm[i][j] = j;
+            auto rng = std::default_random_engine {};
+            std::shuffle(perm[i].begin(), perm[i].end(), rng);
+        }
+    }
+    Ftype noise(const Vec& p) {
+        int x = int(40 * p.x()) & 255;
+        int y = int(40 * p.y()) & 255;
+        int z = int(40 * p.z()) & 255;
+        return rands[perm[0][x] ^ perm[1][y] ^ perm[2][z]];
+    }
+};
+
+struct NoiseTexture: Texture {
+    PerlinNoise perlin;
+    Color color(const Obj *obj, Vec p) { return perlin.noise(p) * Color(1, 1, 1); }
+};
+
 struct SolidColor: Texture {
     Color col;
     SolidColor(Color _col): col(_col) { }
@@ -224,7 +251,7 @@ struct CheckerTexture: Texture {
 struct Diffuse: Material {
     Texture* albedo;
     Diffuse(Texture* _albedo):albedo(_albedo) { }
-    function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray& out) {
+    std::function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray& out) {
         Vec n = obj -> n(in.o);
         out.o = in.o;
         out.p = n + randUnitBall();
@@ -236,7 +263,7 @@ struct Metal: Material {
     Texture* albedo;
     Ftype fuzz;
     Metal(Texture* _albedo, Ftype _fuzz = 0): albedo(_albedo), fuzz(_fuzz) { }
-    function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray &out) {
+    std::function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray &out) {
         Vec n = obj -> n(in.o);
         out.o = in.o;
         out.p = reflect(in.p, n) + fuzz * randUnitBall();
@@ -256,7 +283,7 @@ struct Glass: Material {
     Color albedo;
     Ftype ratio; // sin θt / sin θi == ni / nt
     Glass(Ftype _ratio, Color _albedo = Vec(0.95, 0.95, 0.95)): albedo(_albedo), ratio(_ratio) { }
-    function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray &out) {
+    std::function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray &out) {
         Vec n = obj -> n(in.o);
         Ftype r = dot(in.p, n) > 0 ? 1.0 / ratio : ratio;
         Vec pcos = dot(in.p, n) * n, psin = in.p - pcos;
@@ -299,7 +326,7 @@ struct Triangle: Obj {
 
     Triangle(Vec _a, Vec _b, Vec _c, Vec _nor, Material *mat): Obj(mat), nor(_nor), a(_a), b(_b), c(_c) {
         nor /= nor.norm();
-        if (dot(cross(b - a, c - a), nor) < 0) swap(b, c);
+        if (dot(cross(b - a, c - a), nor) < 0) std::swap(b, c);
     }
 
     HitRecord hit (const Ray& ray) {
@@ -364,7 +391,7 @@ void deleteImg (Color **p, int r) {
     delete[] p;
 }
 
-void toPPM (Color **img, int r, int c, string fname = "out.ppm") {
+void toPPM (Color **img, int r, int c, std::string fname = "out.ppm") {
     FILE *fpt = fopen(fname.c_str(), "w");
     fprintf(fpt, "P3\n");
     fprintf(fpt, "%d %d\n255\n", c, r);
@@ -395,7 +422,7 @@ struct ProgressBar {
     }
 };
 
-void readBinarySTL(string filename, ObjList& objs, Material* mat) {
+void readBinarySTL(std::string filename, ObjList& objs, Material* mat) {
     FILE *f = fopen(filename.c_str(), "rb");
 
     // get size of the buffer
@@ -431,8 +458,8 @@ int main () {
     ProgressBar progress(70);
     int c = 1600, r = 900;
     Color **img = createImg(r, c);
-    map<string, Texture*> textures;
-    map<string, Material*> materials;
+    std::map<std::string, Texture*> textures;
+    std::map<std::string, Material*> materials;
 
     // Textures
     textures["pink"] = new SolidColor(Color(0.8, 0.3, 0.3));
@@ -440,6 +467,7 @@ int main () {
     textures["green"] = new SolidColor(Color(0.8, 0.8, 0.0));
     textures["purple"] = new SolidColor(Color(0.3, 0.2, 0.8));
     textures["checker"] = new CheckerTexture(textures["green"], textures["brown"]);
+    textures["noise"] = new NoiseTexture();
 
     // Materials
     materials["diffuse-pink"] = new Diffuse(textures["pink"]);
@@ -449,12 +477,13 @@ int main () {
     materials["metal"] = new Metal(textures["purple"]);
     materials["glass-outer"] = new Glass(2.0/3.0);
     materials["glass-inner"] = new Glass(1.5);
+    materials["diffuse-noise"] = new Diffuse(textures["noise"]);
 
     // Scens
     ObjList objs;
     Camera cam;
     //
-    switch(1) {
+    switch(3) {
         // scene: tree-balls
         case 1:
             cam = Camera {
@@ -480,6 +509,21 @@ int main () {
                 Vec (-1.726, 19.175, 18.6763),
                 90, 16.0 / 9.0
             };
+            break;
+
+        // scene: two perlin shperes
+        case 3:
+            cam = Camera {
+                Vec (0, 1, 0),
+                Vec (-1.25, 0.8, 0.6),
+                Vec (0, 0, -1),
+                90, 16.0 / 9.0
+            };
+            objs.push_back(new Sphere {Vec(0, 0, -1), 0.5, materials["diffuse-noise"]});
+            objs.push_back(new Sphere {Vec(1, 0, -1), 0.5, materials["metal"]});
+            objs.push_back(new Sphere {Vec(-1, 0, -1), 0.5, materials["glass-outer"]});
+            objs.push_back(new Sphere {Vec(-1, 0, -1), 0.45, materials["glass-inner"]});
+            objs.push_back(new Sphere {Vec(0, -100.5, -1), 100, materials["diffuse-checker"]});
             break;
     }
 
