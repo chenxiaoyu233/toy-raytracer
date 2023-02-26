@@ -99,6 +99,8 @@ struct BBox {
 
 struct Material;
 
+typedef std::pair<Ftype, Ftype> UV;
+
 struct Obj {
     Material *mat;
     Obj(Material *_mat):mat(_mat){ }
@@ -106,6 +108,7 @@ struct Obj {
     virtual HitRecord hit (const Ray& ray) = 0;
     virtual Vec n (const Vec& p) const = 0;
     virtual BBox calcBBox () const = 0;
+    virtual UV uv (const Vec &p) const = 0;
 };
 typedef std::vector<Obj*> ObjList;
 
@@ -126,6 +129,8 @@ struct BVHnode: Obj {
     BVHnode():Obj(NULL){ }
 
     Vec n (const Vec& p) const { return Vec(0, 0, 0); }
+
+    UV uv (const Vec& p) const { return UV(0.0, 0.0); }
 
     bool hitBox(const Ray& ray) {
         auto interval = [=] (int axis) -> std::pair<Ftype, Ftype> {
@@ -167,8 +172,12 @@ struct BVH {
     HitRecord hit (const Ray& ray) { return root -> hit(ray); }
 
     Obj* build(ObjList& objs, bool isRoot = true) {
+        if (isRoot && objs.size() == 0) {
+            std::cerr << "building empty BVH" << std::endl;
+            return root = NULL;
+        }
         if (objs.size() == 0) return NULL;
-        if (objs.size() == 1) return objs[0];
+        if (!isRoot && objs.size() == 1) return objs[0];
 
         int axis = rand() % 3;
         auto cmp = [=] (const Obj* a, const Obj* b) -> bool {
@@ -282,6 +291,28 @@ struct CheckerTexture: Texture {
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 struct ImageTexture: Texture {
+    unsigned char *data;
+    int width, height;
+    ImageTexture(const char* filename) {
+        int cnt;
+        data = stbi_load(filename, &width, &height, &cnt, 3);
+        if (data == NULL) {
+            std::cerr << "fail to load: " << filename << std::endl;
+        }
+    }
+    ~ImageTexture() {
+        stbi_image_free(data);
+    }
+    Color color(const Obj *obj, Vec p) {
+        if (data == NULL) return Color(1, 0, 1);
+        UV uv = obj -> uv(p);
+        Ftype u = uv.first, v = 1 - uv.second;
+        int r = int(v * height), c = int(u * width);
+        r = r < height ? r : height - 1;
+        c = c < width  ? c : width  - 1;
+        unsigned char *pt = data + r * width * 3 + c * 3;
+        return Color(pt[0], pt[1], pt[2]) / 255.0;
+    }
 };
 
 struct Diffuse: Material {
@@ -352,6 +383,13 @@ struct Sphere: Obj {
 
     Vec n (const Vec& p) const { return (p - o) / (p - o).norm(); }
 
+    UV uv (const Vec& p) const {
+        Vec n = this -> n(p);
+        Ftype theta = acos(-n.y());
+        Ftype phi = atan2(-n.z(), n.x()) + M_PI;
+        return UV(phi / 2.0 / M_PI, theta / M_PI);
+    }
+
     BBox calcBBox() const {
         return BBox {o - r * Vec(1, 1, 1), o + r * Vec(1, 1, 1)};
     }
@@ -375,6 +413,10 @@ struct Triangle: Obj {
     }
 
     Vec n (const Vec& p) const { return nor; }
+
+    UV uv (const Vec& p) const {
+        return UV(0, 0); // TODO
+    }
 
     BBox calcBBox() const {
         return BBox::merge(BBox{a, a}, BBox::merge(BBox{b, b}, BBox{c, c}));
@@ -519,7 +561,7 @@ int main () {
     ObjList objs;
     Camera cam;
     //
-    switch(3) {
+    switch(4) {
         // scene: tree-balls
         case 1:
             cam = Camera {
@@ -561,6 +603,17 @@ int main () {
             objs.push_back(new Sphere {Vec(-1, 0, -1), 0.45, materials["glass-inner"]});
             objs.push_back(new Sphere {Vec(0, -100.5, -1), 100, materials["diffuse-checker"]});
             break;
+        case 4:
+            textures["earth"] = new ImageTexture("earthmap.jpg");
+            materials["diffuse-earth"] = new Diffuse(textures["earth"]);
+            objs.push_back(new Sphere {Vec(0, 0, 0), 2, materials["diffuse-earth"]});
+            cam = Camera {
+                Vec (0, 1, 0),
+                Vec (13, 2, 3),
+                Vec (0, 0, 0),
+                20, 16.0 / 9.0
+            };
+            break;
     }
 
     BVH bvh(objs);
@@ -568,9 +621,9 @@ int main () {
     for (int i = 0; i < r; i++) {
         for (int j = 0; j < c; j++) {
             img[i][j] = Color(0, 0, 0);
-            for (int s = 0; s < 100; s++)
+            for (int s = 0; s < 10; s++)
                 img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), bvh, 20);
-            img[i][j] /= 100.0;
+            img[i][j] /= 10.0;
             img[i][j] = Color(sqrt(img[i][j][0]), sqrt(img[i][j][1]), sqrt(img[i][j][2]));
             img[i][j] = img[i][j] * 255.99;
             progress.update(float(i * c + j) / float(r * c));
