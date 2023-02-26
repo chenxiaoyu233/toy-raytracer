@@ -326,6 +326,16 @@ struct Diffuse: Material {
     }
 };
 
+struct DiffuseLight: Material {
+    Texture *emit;
+    DiffuseLight(Texture* _emit): emit(_emit) { }
+    std::function<Color(const Color&)> scatter (const Obj* obj, const Ray& in, Ray& out) {
+        out.o = in.o;
+        out.p = Vec(1, 1, 1);
+        return [=] (const Color& intcol) -> Color { return emit -> color(obj, in.o); };
+    }
+};
+
 struct Metal: Material {
     Texture* albedo;
     Ftype fuzz;
@@ -419,7 +429,11 @@ struct Triangle: Obj {
     }
 
     BBox calcBBox() const {
-        return BBox::merge(BBox{a, a}, BBox::merge(BBox{b, b}, BBox{c, c}));
+        BBox box = BBox::merge(BBox{a, a}, BBox::merge(BBox{b, b}, BBox{c, c}));
+        // make sure the box have non-zero volume
+        box.lb = box.lb - Vec(0.01, 0.01, 0.01);
+        box.ub = box.ub + Vec(0.01, 0.01, 0.01);
+        return box;
     }
 };
 
@@ -444,17 +458,14 @@ Color rayTrace (Ray ray, ObjList& objs, int depth = 50) {
 }
 
 // ray tracing using Bounding Volumes Hierarchies
-Color rayTrace (Ray ray, BVH& bvh, int depth = 50) {
+Color rayTrace (Ray ray, const Color& bg, BVH& bvh, int depth = 50) {
     ray.p = ray.p / ray.p.norm();
     HitRecord rec = bvh.hit(ray);
-    if (rec.obj == NULL){
-        Ftype t = 0.5 * (ray.p.y() + 1.0);
-        return (1.0 - t) * Color(1.0, 1.0, 1.0) + t * Color(0.5, 0.7, 1.0);
-    }
+    if (rec.obj == NULL) return bg;
     Vec at = ray.o + ray.p * rec.t;
     Ray out, in {at, ray.p};
     auto col = rec.obj -> mat -> scatter(rec.obj, in, out);
-    if (depth > 0) return col(rayTrace(out, bvh, depth - 1));
+    if (depth > 0) return col(rayTrace(out, bg, bvh, depth - 1));
     else return Color(0, 0, 0);
 }
 
@@ -560,8 +571,9 @@ int main () {
     // Scens
     ObjList objs;
     Camera cam;
+    Color bg;
     //
-    switch(4) {
+    switch(5) {
         // scene: tree-balls
         case 1:
             cam = Camera {
@@ -575,6 +587,7 @@ int main () {
             objs.push_back(new Sphere {Vec(-1, 0, -1), 0.5, materials["glass-outer"]});
             objs.push_back(new Sphere {Vec(-1, 0, -1), 0.45, materials["glass-inner"]});
             objs.push_back(new Sphere {Vec(0, -100.5, -1), 100, materials["diffuse-checker"]});
+            bg = Color(0.5, 0.7, 1.0);
             break;
 
         // scene: little-witch
@@ -587,6 +600,7 @@ int main () {
                 Vec (-1.726, 19.175, 18.6763),
                 90, 16.0 / 9.0
             };
+            bg = Color(0.5, 0.7, 1.0);
             break;
 
         // scene: two perlin shperes
@@ -602,16 +616,57 @@ int main () {
             objs.push_back(new Sphere {Vec(-1, 0, -1), 0.5, materials["glass-outer"]});
             objs.push_back(new Sphere {Vec(-1, 0, -1), 0.45, materials["glass-inner"]});
             objs.push_back(new Sphere {Vec(0, -100.5, -1), 100, materials["diffuse-checker"]});
+            bg = Color(0.5, 0.7, 1.0);
             break;
         case 4:
             textures["earth"] = new ImageTexture("earthmap.jpg");
             materials["diffuse-earth"] = new Diffuse(textures["earth"]);
             objs.push_back(new Sphere {Vec(0, 0, 0), 2, materials["diffuse-earth"]});
+            bg = Color(0.5, 0.7, 1.0);
             cam = Camera {
                 Vec (0, 1, 0),
                 Vec (13, 2, 3),
                 Vec (0, 0, 0),
                 20, 16.0 / 9.0
+            };
+            break;
+        case 5:
+            textures["red"] = new SolidColor(Color(0.65, 0.05, 0.05));
+            textures["white"] = new SolidColor(Color(0.73, 0.73, 0.73));
+            textures["green"] = new SolidColor(Color(0.12, 0.45, 0.15));
+            textures["light"] = new SolidColor(Color(15., 15., 15.));
+
+            materials["diffuse-red"] = new Diffuse(textures["red"]);
+            materials["diffuse-white"] = new Diffuse(textures["white"]);
+            materials["diffuse-green"] = new Diffuse(textures["green"]);
+            materials["light"] = new DiffuseLight(textures["light"]);
+
+            //left
+            objs.push_back(new Triangle {Vec(555, 0, 0), Vec(555, 0, 555), Vec(555, 555, 555), Vec(-1, 0, 0), materials["diffuse-green"]});
+            objs.push_back(new Triangle {Vec(555, 0, 0), Vec(555, 555, 0), Vec(555, 555, 555), Vec(-1, 0, 0), materials["diffuse-green"]});
+            //right
+            objs.push_back(new Triangle {Vec(0, 0, 0), Vec(0, 0, 555), Vec(0, 555, 555), Vec(1, 0, 0), materials["diffuse-red"]});
+            objs.push_back(new Triangle {Vec(0, 0, 0), Vec(0, 555, 0), Vec(0, 555, 555), Vec(1, 0, 0), materials["diffuse-red"]});
+            //ground
+            objs.push_back(new Triangle {Vec(0, 0, 0), Vec(0, 0, 555), Vec(555, 0, 555), Vec(0, 1, 0), materials["diffuse-white"]});
+            objs.push_back(new Triangle {Vec(0, 0, 0), Vec(555, 0, 0), Vec(555, 0, 555), Vec(0, 1, 0), materials["diffuse-white"]});
+            //top
+            objs.push_back(new Triangle {Vec(0, 555, 0), Vec(0, 555, 555), Vec(555, 555, 555), Vec(0, -1, 0), materials["diffuse-white"]});
+            objs.push_back(new Triangle {Vec(0, 555, 0), Vec(555, 555, 0), Vec(555, 555, 555), Vec(0, -1, 0), materials["diffuse-white"]});
+            //front
+            objs.push_back(new Triangle {Vec(0, 0, 555), Vec(0, 555, 555), Vec(555, 555, 555), Vec(0, 0, -1), materials["diffuse-white"]});
+            objs.push_back(new Triangle {Vec(0, 0, 555), Vec(555, 0, 555), Vec(555, 555, 555), Vec(0, 0, -1), materials["diffuse-white"]});
+            //light
+            objs.push_back(new Triangle {Vec(213, 554, 227), Vec(343, 554, 227), Vec(343, 554, 332), Vec(0, -1, 0), materials["light"]});
+            objs.push_back(new Triangle {Vec(213, 554, 227), Vec(213, 554, 332), Vec(343, 554, 332), Vec(0, -1, 0), materials["light"]});
+
+            //bg = Color(0.5, 0.7, 1.0);
+            bg = Color(0, 0, 0);
+            cam = Camera {
+                Vec(0, 1, 0),
+                Vec(278, 278, -800),
+                Vec(278, 278, 0),
+                40, 16.0 / 9.0 
             };
             break;
     }
@@ -621,9 +676,9 @@ int main () {
     for (int i = 0; i < r; i++) {
         for (int j = 0; j < c; j++) {
             img[i][j] = Color(0, 0, 0);
-            for (int s = 0; s < 10; s++)
-                img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), bvh, 20);
-            img[i][j] /= 10.0;
+            for (int s = 0; s < 100; s++)
+                img[i][j] += rayTrace(cam.rayAt(Ftype(i) + drand48(), Ftype(j) + drand48(), r, c), bg, bvh, 5);
+            img[i][j] /= 100.0;
             img[i][j] = Color(sqrt(img[i][j][0]), sqrt(img[i][j][1]), sqrt(img[i][j][2]));
             img[i][j] = img[i][j] * 255.99;
             progress.update(float(i * c + j) / float(r * c));
